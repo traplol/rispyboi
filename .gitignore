@@ -1,0 +1,55 @@
+# Rust/Cargo
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.#*
+
+# Logs
+*.log
+
+# Environment and config
+.env
+.env.local
+.env.*.local
+
+# AI Assistant files
+.aider*
+.cursor/
+.claude
+
+# Test artifacts
+*.profraw
+*.gcno
+*.gcda
+
+# Documentation build
+/book/
+/docs/_build/
+
+# Local development
+scratch/
+tmp/
+local/
+
+# Backup files
+*.backup
+*.bak
+*~
