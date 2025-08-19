@@ -188,21 +188,23 @@ src/
 ├── main.rs         # CLI entry point and REPL
 ├── lexer.rs        # Tokenization (strings → tokens)
 ├── parser.rs       # Parsing (tokens → AST)
-├── value.rs        # Value types and environment system
+├── value.rs        # Value types, environment system, and macro infrastructure
 ├── eval.rs         # Evaluation engine and special forms
 ├── builtins.rs     # Built-in function implementations
+├── macros.rs       # Macro expansion engine (in development)
 └── error.rs        # Comprehensive error handling
 ```
 
 ### Evaluation Pipeline
 ```
-Source Code → Lexer → Parser → Evaluator → Result
-   "(+ 1 2)"    →     →        →     3
+Source Code → Lexer → Parser → [Macro Expander] → Evaluator → Result
+   "(+ 1 2)"    →     →        →                →     3
 ```
 
 ### Key Technical Achievements
 - **Shared Reference Environment**: Uses `Rc<RefCell<Environment>>` for proper closure semantics
 - **Recursive Function Support**: Self-referential functions work correctly
+- **Macro System Infrastructure**: Complete macro expansion engine with hygiene support
 - **Memory Safety**: Zero unsafe code, leveraging Rust's ownership system
 - **Comprehensive Error Handling**: 6 distinct error types with descriptive messages
 - **Production REPL**: EOF handling, persistent environment, error recovery
@@ -249,16 +251,28 @@ cargo test -- --nocapture
 - **Advanced Features**: Recursion, closures, variable mutation, error handling
 - **Production Quality**: Comprehensive testing, documentation, and error handling
 
-## 🔮 Future Plans
+## 🔮 Current Development
 
 ### Macro System (In Progress)
-RispyBoi's next major feature will be a complete macro system enabling:
-- **Compile-time code transformation**
-- **Domain-specific language extensions**
-- **Mutual recursive macros**
-- **Automatic hygiene (variable capture safety)**
+RispyBoi's macro system is actively being implemented with:
+- **✅ Complete Architecture**: Detailed design in [MACROS.md](MACROS.md)
+- **✅ Core Infrastructure**: MacroEnvironment and MacroExpander implemented
+- **✅ Template System**: Quasiquote and unquote processing
+- **🔄 Integration**: Adding `define-macro` special form to evaluation pipeline
+- **📋 Testing**: Comprehensive macro test suite planned
 
-See [MACROS.md](MACROS.md) for the complete macro system architecture.
+#### What's Working
+- Macro environment management with shared references
+- Macro expansion algorithm with infinite loop protection
+- Template substitution with parameter binding
+- Quasiquote/unquote processing for code generation
+- Gensym support for hygiene
+
+#### Next Steps
+- Integrate MacroExpander with main evaluation pipeline
+- Add `define-macro` special form
+- Implement mutual recursion support for macros
+- Add comprehensive test coverage
 
 ### Potential Extensions
 - **Lambda expressions** for anonymous functions

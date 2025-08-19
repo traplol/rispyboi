@@ -5,7 +5,8 @@ The built-ins module (`src/builtins.rs`) implements the minimal set of primitive
 
 ## Current Implementation Status
 ✅ **Implemented**: 12 built-in functions  
-⚠️  **Missing Core Primitives**: `set!`, additional comparison operators  
+✅ **Special Forms**: `set!` implemented as special form (not built-in)
+🔄 **Macro System**: Core infrastructure completed, integration in progress
 📋 **To Be Implemented as Macros**: Multi-argument arithmetic, derived comparisons, list utilities
 
 ## Design Philosophy
@@ -221,17 +222,17 @@ fn builtin_set(args: &[Value]) -> Result<Value, RispyError>
 
 ## Functions That Should Be Macros (Not Built-ins)
 
-### Multi-Argument Arithmetic
+### Multi-Argument Arithmetic (Will Be Macros)
 ```lisp
-;; These should be macro-expanded to binary operations
+;; Will be macro-expanded to binary operations once macro system is complete
 (+ 1 2 3 4)      ; → (+ (+ (+ 1 2) 3) 4)
 (* 2 3 4 5)      ; → (* (* (* 2 3) 4) 5)
 (- 10 2 3)       ; → (- (- 10 2) 3)
 ```
 
-### Logical Operations
+### Logical Operations (Will Be Macros)
 ```lisp
-;; Can be implemented as macros using 'if'
+;; Will be implemented as macros using 'if' once macro system is complete
 (define-macro and (a b) `(if ,a ,b #f))
 (define-macro or (a b) `(if ,a #t ,b))
 (define-macro not (a) `(if ,a #f #t))
@@ -495,8 +496,10 @@ mod tests {
 - 📋 **Nice to have**: `not`, more type predicates (`number?`, `string?`, etc.)
 - 📋 **Should be macros**: `>`, `<=`, `>=`, `!=`, multi-arg arithmetic
 
-### Recommendation
-**Immediate priority**: Implement `set!` as it's essential for Lisp semantics. Everything else can wait or be implemented as macros once we have a macro system.
+### Current Status and Recommendation
+**✅ Complete**: `set!` has been implemented as a special form and is working correctly.
+
+**🔄 Current Priority**: The macro system is being actively developed to enable derived operators and multi-argument functions. Core infrastructure is complete and integration is in progress.
 
 ## Security Considerations
 

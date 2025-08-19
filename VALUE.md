@@ -112,13 +112,14 @@ pub struct UserFunction {
 pub struct MacroFunction {
     pub name: String,
     pub params: Vec<String>,
-    pub body: Value,
-    pub env: Environment,
+    pub body: Box<Value>,
+    pub env: Rc<Environment>,
 }
 ```
-- Macros defined with `macro` special form
+- Macros defined with `define-macro` special form (in development)
 - Similar to user functions but expand at compile-time
 - Transform code before evaluation
+- Uses `Box<Value>` for body and `Rc<Environment>` for shared references
 
 ## Arity System
 
@@ -293,3 +294,43 @@ pub fn check_arity(args: &[Value], expected: &Arity) -> Result<(), RispyError>
 - Round-trip parsing/display
 - Clone equivalence
 - Type predicate consistency
+
+## Environment System
+
+### Runtime Environment Structure
+```rust
+#[derive(Debug)]
+pub struct Environment {
+    bindings: RefCell<HashMap<String, Value>>,
+    parent: Option<Rc<Environment>>,
+}
+```
+- Implements lexical scoping with parent environment chains
+- Uses `Rc<Environment>` for shared references enabling proper closures
+- Uses `RefCell` for interior mutability while maintaining shared ownership
+- Variables resolve through scope chain traversal
+- Functions capture their definition environment as closures
+
+### Environment Operations
+```rust
+impl Environment {
+    pub fn new() -> Rc<Environment>
+    pub fn with_parent(parent: Rc<Environment>) -> Rc<Environment>
+    pub fn get(&self, name: &str) -> Option<Value>
+    pub fn set(&self, name: &str, value: Value) -> Result<(), RispyError>
+    pub fn define(&self, name: String, value: Value)
+}
+```
+
+### MacroEnvironment Structure (In Development)
+```rust
+#[derive(Debug)]
+pub struct MacroEnvironment {
+    macros: RefCell<HashMap<String, MacroFunction>>,
+    parent: Option<Rc<MacroEnvironment>>,
+}
+```
+- Separate environment for macro definitions during compile-time
+- Uses similar shared reference pattern as runtime environments
+- Enables proper macro scoping and mutual recursion support
+- Implements methods: `new()`, `get()`, `define()`, `has_macro()`

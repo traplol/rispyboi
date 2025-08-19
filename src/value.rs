@@ -127,6 +127,57 @@ impl Environment {
     }
 }
 
+#[derive(Debug)]
+pub struct MacroEnvironment {
+    macros: RefCell<HashMap<String, MacroFunction>>,
+    parent: Option<Rc<MacroEnvironment>>,
+}
+
+impl MacroEnvironment {
+    pub fn new() -> Rc<Self> {
+        Rc::new(MacroEnvironment {
+            macros: RefCell::new(HashMap::new()),
+            parent: None,
+        })
+    }
+
+    pub fn with_parent(parent: Rc<MacroEnvironment>) -> Rc<Self> {
+        Rc::new(MacroEnvironment {
+            macros: RefCell::new(HashMap::new()),
+            parent: Some(parent),
+        })
+    }
+
+    pub fn define(&self, name: String, macro_func: MacroFunction) {
+        self.macros.borrow_mut().insert(name, macro_func);
+    }
+
+    pub fn get(&self, name: &str) -> Option<MacroFunction> {
+        if let Some(macro_func) = self.macros.borrow().get(name) {
+            Some(macro_func.clone())
+        } else if let Some(parent) = &self.parent {
+            parent.get(name)
+        } else {
+            None
+        }
+    }
+
+    pub fn has_macro(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    pub fn declare_placeholder(&self, name: String) {
+        // Create a placeholder macro for forward references
+        let placeholder = MacroFunction {
+            name: name.clone(),
+            params: vec![],
+            body: Box::new(Value::Nil),
+            env: Environment::new(), // Empty environment for placeholder
+        };
+        self.macros.borrow_mut().insert(name, placeholder);
+    }
+}
+
 impl Value {
     pub fn nil() -> Value {
         Value::Nil

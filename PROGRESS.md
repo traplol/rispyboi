@@ -5,7 +5,7 @@
 ### 🏆 **Latest Achievement: Variable Mutation with `set!`**
 RispyBoi now has **complete Lisp semantics** including variable mutation, recursion, and proper closure support!
 
-## ✅ **Current Status: Production-Ready Lisp Interpreter**
+## ✅ **Current Status: Production-Ready Lisp Interpreter with Macro System (In Progress)**
 
 ### 🚀 **All Core Features Working**
 - **✅ Tokenization**: Complete Lisp syntax with comprehensive edge case handling  
@@ -19,9 +19,16 @@ RispyBoi now has **complete Lisp semantics** including variable mutation, recurs
 - **✅ Recursion**: Fully working recursive functions (factorial, fibonacci, etc.)
 - **✅ Closures**: Proper closure semantics with live environment references
 - **✅ REPL**: Fully functional with EOF handling and persistent environment
+- **🔄 Macro System**: Core infrastructure implemented, integration in progress
 - **✅ Test Coverage**: **162 tests total** with **100% pass rate**
 
 ### 🔧 **Recent Major Improvements**
+
+#### **Macro System Infrastructure** 🔄 (In Progress)
+- **MacroEnvironment**: Implemented with shared references for macro storage
+- **MacroExpander**: Core expansion engine with gensym support
+- **Template System**: Quasiquote and unquote processing implemented
+- **Next Steps**: Integration with main evaluation pipeline
 
 #### **Environment Architecture Refactoring** ✅
 - **Before**: `Box<Environment>` with owned parent references
@@ -86,14 +93,15 @@ test result: ok. 162 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 ## 🏗️ **Implementation Architecture**
 
-### **Core Modules (All Complete)**
+### **Core Modules**
 - **✅ main.rs** - CLI entry point, REPL with EOF handling
 - **✅ error.rs** - Comprehensive error type system
 - **✅ lexer.rs** - Complete tokenization with edge case handling
-- **✅ value.rs** - Value types and shared reference environment system
+- **✅ value.rs** - Value types, shared reference environment system, MacroEnvironment
 - **✅ parser.rs** - S-expression parsing with quote syntax
 - **✅ eval.rs** - Complete evaluation engine with all special forms
 - **✅ builtins.rs** - 12 essential built-in functions
+- **🔄 macros.rs** - Macro expansion engine (core implemented, integration pending)
 
 ### **Special Forms (5 total)**
 1. **✅ `quote`** - Prevents evaluation
@@ -162,13 +170,19 @@ test result: ok. 162 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 - ✅ Persistent REPL environment
 - ✅ Comprehensive error handling and reporting
 
-### **📋 Future Enhancements (Optional)**
-1. **Macro System** - Code-as-data manipulation and custom syntax
-2. **Lambda Expressions** - Anonymous functions
-3. **Extended Standard Library** - More built-in functions  
-4. **Advanced Special Forms** - `let`, `cond`, `when`, `unless`
-5. **Tail Call Optimization** - Efficient recursive calls
-6. **Better Error Messages** - Source location tracking
+### **🔄 Current Development: Macro System**
+- **✅ Architecture Design**: Complete specification in MACROS.md
+- **✅ Core Infrastructure**: MacroEnvironment and MacroExpander implemented
+- **✅ Template System**: Quasiquote and unquote processing
+- **🔄 Integration**: Adding `define-macro` special form and evaluation pipeline
+- **📋 Testing**: Comprehensive macro test suite
+
+### **📋 Future Enhancements (Post-Macros)**
+1. **Lambda Expressions** - Anonymous functions
+2. **Extended Standard Library** - More built-in functions  
+3. **Advanced Special Forms** - `let`, `cond`, `when`, `unless` (implementable as macros)
+4. **Tail Call Optimization** - Efficient recursive calls
+5. **Better Error Messages** - Source location tracking
 
 ## 🏆 **Project Statistics**
 

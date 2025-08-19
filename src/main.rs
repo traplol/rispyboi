@@ -7,6 +7,7 @@ mod builtins;
 mod error;
 mod eval;
 mod lexer;
+mod macros;
 mod parser;
 mod value;
 
@@ -48,8 +49,8 @@ fn run_repl() {
     println!("RispyBoi Lisp Interpreter");
     println!("Type expressions to evaluate, or 'exit' to quit.");
 
-    // Create persistent environment for REPL session
-    let env = eval::create_global_environment();
+    // Create persistent environment and macro expander for REPL session
+    let (env, macro_expander) = eval::create_global_environment_with_macros();
 
     loop {
         print!("rispy> ");
@@ -70,7 +71,7 @@ fn run_repl() {
                 }
 
                 if !input.is_empty() {
-                    if let Err(e) = execute_repl_input(input, &env) {
+                    if let Err(e) = execute_repl_input(input, &env, &macro_expander) {
                         eprintln!("Error: {}", e);
                     }
                 }
@@ -83,12 +84,16 @@ fn run_repl() {
     }
 }
 
-fn execute_repl_input(source: &str, env: &Rc<Environment>) -> Result<(), RispyError> {
+fn execute_repl_input(
+    source: &str,
+    env: &Rc<Environment>,
+    macro_expander: &macros::MacroExpander,
+) -> Result<(), RispyError> {
     let tokens = lexer::tokenize(source)?;
     let ast = parser::parse(tokens)?;
 
     for expr in ast {
-        let result = eval::eval(&expr, env)?;
+        let result = eval::eval_with_macros(&expr, env, macro_expander)?;
         println!("{}", result);
     }
 
@@ -98,10 +103,10 @@ fn execute_repl_input(source: &str, env: &Rc<Environment>) -> Result<(), RispyEr
 fn execute_program(source: &str) -> Result<(), RispyError> {
     let tokens = lexer::tokenize(source)?;
     let ast = parser::parse(tokens)?;
-    let env = eval::create_global_environment();
+    let (env, macro_expander) = eval::create_global_environment_with_macros();
 
     for expr in ast {
-        let result = eval::eval(&expr, &env)?;
+        let result = eval::eval_with_macros(&expr, &env, &macro_expander)?;
         println!("{}", result);
     }
 

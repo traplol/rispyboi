@@ -1,9 +1,33 @@
 use crate::builtins;
 use crate::error::RispyError;
-use crate::value::{Environment, Function, Value};
+use crate::macros::MacroExpander;
+use crate::value::{Environment, Function, MacroEnvironment, MacroFunction, Value};
 use std::rc::Rc;
 
 pub fn eval(expr: &Value, env: &Rc<Environment>) -> Result<Value, RispyError> {
+    // For backward compatibility, use eval_with_macros with empty macro environment
+    let macro_env = MacroEnvironment::new();
+    let macro_expander = MacroExpander::new(macro_env);
+    eval_with_macros(expr, env, &macro_expander)
+}
+
+pub fn eval_with_macros(
+    expr: &Value,
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
+    // Phase 1: Macro expansion
+    let expanded = macro_expander.expand(expr)?;
+    
+    // Phase 2: Runtime evaluation
+    eval_runtime(&expanded, env, macro_expander)
+}
+
+fn eval_runtime(
+    expr: &Value,
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     match expr {
         // Self-evaluating forms
         Value::Nil | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(expr.clone()),
@@ -12,7 +36,7 @@ pub fn eval(expr: &Value, env: &Rc<Environment>) -> Result<Value, RispyError> {
         Value::Symbol(name) => eval_symbol(name, env),
 
         // List evaluation (function application or special form)
-        Value::List(list) => eval_list(list, env),
+        Value::List(list) => eval_list_runtime(list, env, macro_expander),
 
         // Functions are values but shouldn't be directly evaluated
         Value::Function(_) => Ok(expr.clone()),
@@ -24,7 +48,11 @@ fn eval_symbol(name: &str, env: &Rc<Environment>) -> Result<Value, RispyError> {
         .ok_or_else(|| RispyError::UndefinedSymbol(format!("Undefined variable: {}", name)))
 }
 
-fn eval_list(list: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_list_runtime(
+    list: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if list.is_empty() {
         return Ok(Value::List(vec![])); // Empty list evaluates to itself
     }
@@ -35,22 +63,23 @@ fn eval_list(list: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError>
     if let Value::Symbol(name) = first {
         match name.as_str() {
             "quote" => eval_quote(&list[1..], env),
-            "if" => eval_if(&list[1..], env),
-            "define" => eval_define(&list[1..], env),
-            "define-function" => eval_define_function(&list[1..], env),
-            "set!" => eval_set(&list[1..], env),
+            "if" => eval_if(&list[1..], env, macro_expander),
+            "define" => eval_define(&list[1..], env, macro_expander),
+            "define-function" => eval_define_function(&list[1..], env, macro_expander),
+            "define-macro" => eval_define_macro(&list[1..], macro_expander),
+            "set!" => eval_set(&list[1..], env, macro_expander),
             _ => {
                 // Try function application
-                eval_function_application(list, env)
+                eval_function_application(list, env, macro_expander)
             }
         }
     } else {
         // Evaluate first element in case it's a function expression
-        let func = eval(first, env)?;
+        let func = eval_runtime(first, env, macro_expander)?;
         if let Value::Function(_) = func {
             let mut new_list = vec![func];
             new_list.extend_from_slice(&list[1..]);
-            eval_function_application(&new_list, env)
+            eval_function_application(&new_list, env, macro_expander)
         } else {
             Err(RispyError::TypeError(
                 "First element of list must be a function or symbol".to_string(),
@@ -59,7 +88,11 @@ fn eval_list(list: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError>
     }
 }
 
-fn eval_function_application(list: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_function_application(
+    list: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if list.is_empty() {
         return Err(RispyError::RuntimeError(
             "Cannot apply empty list".to_string(),
@@ -72,7 +105,7 @@ fn eval_function_application(list: &[Value], env: &Rc<Environment>) -> Result<Va
     // Evaluate arguments
     let mut evaluated_args = Vec::new();
     for arg in args {
-        evaluated_args.push(eval(arg, env)?);
+        evaluated_args.push(eval_runtime(arg, env, macro_expander)?);
     }
 
     // Get the function
@@ -129,7 +162,7 @@ fn eval_function_application(list: &[Value], env: &Rc<Environment>) -> Result<Va
                 }
 
                 // Evaluate the function body in the new environment
-                eval(&user_func.body, &call_env)
+                eval_runtime(&user_func.body, &call_env, macro_expander)
             }
             Function::Macro(_) => {
                 // TODO: Implement macro expansion
@@ -153,14 +186,18 @@ fn eval_quote(args: &[Value], _env: &Rc<Environment>) -> Result<Value, RispyErro
     Ok(args[0].clone())
 }
 
-fn eval_if(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_if(
+    args: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if args.len() != 3 {
         return Err(RispyError::ArityError(
             "if expects exactly 3 arguments (condition then else)".to_string(),
         ));
     }
 
-    let condition = eval(&args[0], env)?;
+    let condition = eval_runtime(&args[0], env, macro_expander)?;
 
     // Check if condition is truthy (anything except nil and #f is true)
     let is_truthy = match condition {
@@ -170,13 +207,17 @@ fn eval_if(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
     };
 
     if is_truthy {
-        eval(&args[1], env) // then branch
+        eval_runtime(&args[1], env, macro_expander) // then branch
     } else {
-        eval(&args[2], env) // else branch
+        eval_runtime(&args[2], env, macro_expander) // else branch
     }
 }
 
-fn eval_define(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_define(
+    args: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if args.len() != 2 {
         return Err(RispyError::ArityError(
             "define expects exactly 2 arguments (name value)".to_string(),
@@ -194,7 +235,7 @@ fn eval_define(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyErro
     };
 
     // Evaluate the value
-    let value = eval(&args[1], env)?;
+    let value = eval_runtime(&args[1], env, macro_expander)?;
 
     // Define the variable in the environment
     env.define(name, value);
@@ -203,7 +244,11 @@ fn eval_define(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyErro
     Ok(Value::Nil)
 }
 
-fn eval_set(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_set(
+    args: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if args.len() != 2 {
         return Err(RispyError::ArityError(
             "set! expects exactly 2 arguments (name value)".to_string(),
@@ -221,7 +266,7 @@ fn eval_set(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> 
     };
 
     // Evaluate the value
-    let value = eval(&args[1], env)?;
+    let value = eval_runtime(&args[1], env, macro_expander)?;
 
     // Set the variable in the environment (define if it doesn't exist)
     match env.set(&name, value.clone()) {
@@ -236,7 +281,11 @@ fn eval_set(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> 
     Ok(value)
 }
 
-fn eval_define_function(args: &[Value], env: &Rc<Environment>) -> Result<Value, RispyError> {
+fn eval_define_function(
+    args: &[Value],
+    env: &Rc<Environment>,
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
     if args.len() != 3 {
         return Err(RispyError::ArityError(
             "define-function expects exactly 3 arguments (name params body)".to_string(),
@@ -306,6 +355,67 @@ fn eval_define_function(args: &[Value], env: &Rc<Environment>) -> Result<Value, 
     Ok(Value::Nil)
 }
 
+fn eval_define_macro(
+    args: &[Value],
+    macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
+    if args.len() != 3 {
+        return Err(RispyError::ArityError(
+            "define-macro expects exactly 3 arguments (name params body)".to_string(),
+        ));
+    }
+
+    // First argument must be a symbol (macro name)
+    let name = match &args[0] {
+        Value::Symbol(name) => name.clone(),
+        _ => {
+            return Err(RispyError::TypeError(
+                "define-macro: first argument must be a symbol".to_string(),
+            ));
+        }
+    };
+
+    // Second argument must be a list of parameter symbols
+    let params = match &args[1] {
+        Value::List(param_list) => {
+            let mut params = Vec::new();
+            for param in param_list {
+                match param {
+                    Value::Symbol(param_name) => params.push(param_name.clone()),
+                    _ => {
+                        return Err(RispyError::TypeError(
+                            "define-macro: parameters must be symbols".to_string(),
+                        ));
+                    }
+                }
+            }
+            params
+        }
+        _ => {
+            return Err(RispyError::TypeError(
+                "define-macro: second argument must be a list of parameters".to_string(),
+            ));
+        }
+    };
+
+    // Third argument is the body (template)
+    let body = args[2].clone();
+
+    // Create a macro function
+    let macro_function = MacroFunction {
+        name: name.clone(),
+        params,
+        body: Box::new(body),
+        env: Environment::new(), // Macros have their own scope
+    };
+
+    // Define the macro in the macro environment
+    macro_expander.define_macro(name, macro_function);
+
+    // Return nil
+    Ok(Value::Nil)
+}
+
 pub fn create_global_environment() -> Rc<Environment> {
     let env = Environment::new();
 
@@ -316,6 +426,13 @@ pub fn create_global_environment() -> Rc<Environment> {
     }
 
     env
+}
+
+pub fn create_global_environment_with_macros() -> (Rc<Environment>, MacroExpander) {
+    let env = create_global_environment();
+    let macro_env = MacroEnvironment::new();
+    let macro_expander = MacroExpander::new(macro_env);
+    (env, macro_expander)
 }
 
 #[cfg(test)]
@@ -744,6 +861,66 @@ mod tests {
             let result = eval(&expr, &env).unwrap();
             assert_eq!(result, expected, "Failed for source: {}", source);
         }
+    }
+
+    #[test]
+    fn test_define_macro_basic() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+        
+        // Define a simple identity macro
+        let define_input = "(define-macro identity (x) x)";
+        let tokens = crate::lexer::tokenize(define_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        let result = eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Nil); // define-macro returns nil
+        
+        // Use the macro - should expand identity to just the argument
+        let use_input = "(identity 42)";
+        let tokens = crate::lexer::tokenize(use_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        let result = eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(42.0));
+    }
+
+    #[test]
+    fn test_define_macro_with_template() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+        
+        // Define a simple template macro without quasiquote for now
+        // (define-macro when (test body) (if test body nil))
+        let define_input = "(define-macro when (test body) (if test body nil))";
+        let tokens = crate::lexer::tokenize(define_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        let result = eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Nil);
+        
+        // Use the when macro
+        let use_input = "(when #t (+ 1 2))";
+        let tokens = crate::lexer::tokenize(use_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        let result = eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_macro_expansion_integration() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+        
+        // Test that macros are expanded before evaluation
+        // This is an integration test for the two-phase evaluation
+        
+        // Define a simple macro without quasiquote for now
+        let define_input = "(define-macro double (x) (* 2 x))";
+        let tokens = crate::lexer::tokenize(define_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        
+        // Use the macro in a larger expression
+        let use_input = "(+ (double 3) (double 4))";
+        let tokens = crate::lexer::tokenize(use_input).unwrap();
+        let ast = crate::parser::parse(tokens).unwrap();
+        let result = eval_with_macros(&ast[0], &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(14.0)); // (* 2 3) + (* 2 4) = 6 + 8 = 14
     }
 
     #[test]
