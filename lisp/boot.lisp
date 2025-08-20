@@ -233,6 +233,15 @@
   (if (null? lst) 0 (/ (sum lst) (length lst))))
 
 ;; =============================================================================
+;; Section 13: Function Creation Utilities
+;; =============================================================================
+
+;; LAMBDA - convenient syntax for creating anonymous functions
+;; Uses the internal %%lambda primitive
+(define-macro lambda (params body)
+  (cons (quote %%lambda) (cons params (cons body ()))))
+
+;; =============================================================================
 ;; Boot Library Successfully Loaded
 ;; =============================================================================
 

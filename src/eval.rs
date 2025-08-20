@@ -1,7 +1,7 @@
 use crate::builtins;
 use crate::error::RispyError;
 use crate::macros::MacroExpander;
-use crate::value::{Environment, Function, MacroEnvironment, MacroFunction, Value};
+use crate::value::{Environment, Function, MacroEnvironment, MacroFunction, UserFunction, Value};
 use std::rc::Rc;
 
 pub fn eval(expr: &Value, env: &Rc<Environment>) -> Result<Value, RispyError> {
@@ -68,6 +68,7 @@ fn eval_list_runtime(
             "define-function" => eval_define_function(&list[1..], env, macro_expander),
             "define-macro" => eval_define_macro(&list[1..], macro_expander),
             "set!" => eval_set(&list[1..], env, macro_expander),
+            "%%lambda" => eval_lambda(&list[1..], env, macro_expander),
             _ => {
                 // Try function application
                 eval_function_application(list, env, macro_expander)
@@ -153,8 +154,8 @@ fn eval_function_application(
                     )));
                 }
 
-                // Create new environment with current environment as parent (for live references)
-                let call_env = Environment::with_parent(env.clone());
+                // Create new environment with closure as parent (for proper lexical scoping)
+                let call_env = Environment::with_parent(user_func.closure.clone());
 
                 // Bind parameters to arguments
                 for (param, arg) in user_func.params.iter().zip(evaluated_args.iter()) {
@@ -414,6 +415,54 @@ fn eval_define_macro(
 
     // Return nil
     Ok(Value::Nil)
+}
+
+fn eval_lambda(
+    args: &[Value],
+    env: &Rc<Environment>,
+    _macro_expander: &MacroExpander,
+) -> Result<Value, RispyError> {
+    if args.len() != 2 {
+        return Err(RispyError::ArityError(
+            "%%lambda expects exactly 2 arguments (params body)".to_string(),
+        ));
+    }
+
+    // First argument must be a list of parameter symbols
+    let params = match &args[0] {
+        Value::List(param_list) => {
+            let mut params = Vec::new();
+            for param in param_list {
+                match param {
+                    Value::Symbol(param_name) => params.push(param_name.clone()),
+                    _ => {
+                        return Err(RispyError::TypeError(
+                            "%%lambda: parameter list must contain only symbols".to_string(),
+                        ));
+                    }
+                }
+            }
+            params
+        }
+        _ => {
+            return Err(RispyError::TypeError(
+                "%%lambda: first argument must be a list of parameters".to_string(),
+            ));
+        }
+    };
+
+    // Second argument is the body
+    let body = args[1].clone();
+
+    // Create a user-defined function that captures the current environment
+    let user_function = UserFunction {
+        name: None, // Lambda functions are anonymous
+        params,
+        body: Box::new(body),
+        closure: env.clone(), // Capture the current environment for closures
+    };
+
+    Ok(Value::Function(Box::new(Function::UserDefined(Box::new(user_function)))))
 }
 
 pub fn create_global_environment() -> Rc<Environment> {
@@ -1993,5 +2042,340 @@ mod tests {
                 assert_eq!(user_func.closure.get("c"), Some(Value::Number(3.0)));
             }
         }
+    }
+
+    // =============================================================================
+    // Tests for %%lambda primitive
+    // =============================================================================
+
+    #[test]
+    fn test_lambda_primitive_creation() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Test basic lambda creation
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::List(vec![
+                Value::Symbol("+".to_string()),
+                Value::Symbol("x".to_string()),
+                Value::Number(1.0),
+            ]),
+        ]);
+
+        let result = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+        
+        // Should return a function
+        assert!(matches!(result, Value::Function(_)));
+        
+        if let Value::Function(func) = result {
+            if let crate::value::Function::UserDefined(user_func) = func.as_ref() {
+                assert_eq!(user_func.params, vec!["x".to_string()]);
+                assert_eq!(user_func.name, None); // Lambda functions are anonymous
+            }
+        }
+    }
+
+    #[test]
+    fn test_lambda_primitive_execution() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create a lambda function
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::List(vec![
+                Value::Symbol("*".to_string()),
+                Value::Symbol("x".to_string()),
+                Value::Number(2.0),
+            ]),
+        ]);
+
+        let lambda_func = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+
+        // Store the lambda in a variable
+        env.define("double".to_string(), lambda_func);
+
+        // Call the lambda function
+        let call_expr = Value::List(vec![
+            Value::Symbol("double".to_string()),
+            Value::Number(5.0),
+        ]);
+
+        let result = eval_with_macros(&call_expr, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(10.0));
+    }
+
+    #[test]
+    fn test_lambda_primitive_multiple_parameters() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create lambda with multiple parameters
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![
+                Value::Symbol("x".to_string()),
+                Value::Symbol("y".to_string()),
+            ]),
+            Value::List(vec![
+                Value::Symbol("+".to_string()),
+                Value::Symbol("x".to_string()),
+                Value::Symbol("y".to_string()),
+            ]),
+        ]);
+
+        let lambda_func = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+        env.define("add".to_string(), lambda_func);
+
+        // Call with two arguments
+        let call_expr = Value::List(vec![
+            Value::Symbol("add".to_string()),
+            Value::Number(3.0),
+            Value::Number(7.0),
+        ]);
+
+        let result = eval_with_macros(&call_expr, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(10.0));
+    }
+
+    #[test]
+    fn test_lambda_primitive_zero_parameters() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create lambda with no parameters
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![]), // Empty parameter list
+            Value::Number(42.0), // Simple constant body
+        ]);
+
+        let lambda_func = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+        env.define("get-answer".to_string(), lambda_func);
+
+        // Call with no arguments
+        let call_expr = Value::List(vec![
+            Value::Symbol("get-answer".to_string()),
+        ]);
+
+        let result = eval_with_macros(&call_expr, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(42.0));
+    }
+
+    #[test]
+    fn test_lambda_primitive_closure_capture() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Define variables in environment
+        env.define("multiplier".to_string(), Value::Number(3.0));
+
+        // Create lambda that uses external variable
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::List(vec![
+                Value::Symbol("*".to_string()),
+                Value::Symbol("x".to_string()),
+                Value::Symbol("multiplier".to_string()), // Captures from environment
+            ]),
+        ]);
+
+        let lambda_func = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+        env.define("triple".to_string(), lambda_func);
+
+        // Call the lambda
+        let call_expr = Value::List(vec![
+            Value::Symbol("triple".to_string()),
+            Value::Number(4.0),
+        ]);
+
+        let result = eval_with_macros(&call_expr, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(12.0)); // 4 * 3 = 12
+    }
+
+    #[test]
+    fn test_lambda_primitive_nested_lambdas() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create a lambda that returns another lambda (currying)
+        let outer_lambda = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::List(vec![
+                Value::Symbol("%%lambda".to_string()),
+                Value::List(vec![Value::Symbol("y".to_string())]),
+                Value::List(vec![
+                    Value::Symbol("+".to_string()),
+                    Value::Symbol("x".to_string()),
+                    Value::Symbol("y".to_string()),
+                ]),
+            ]),
+        ]);
+
+        let outer_func = eval_with_macros(&outer_lambda, &env, &macro_expander).unwrap();
+        env.define("make-adder".to_string(), outer_func);
+
+        // Call outer lambda to get inner lambda
+        let get_inner = Value::List(vec![
+            Value::Symbol("make-adder".to_string()),
+            Value::Number(10.0),
+        ]);
+
+        let inner_func = eval_with_macros(&get_inner, &env, &macro_expander).unwrap();
+        env.define("add-ten".to_string(), inner_func);
+
+        // Call inner lambda
+        let call_inner = Value::List(vec![
+            Value::Symbol("add-ten".to_string()),
+            Value::Number(5.0),
+        ]);
+
+        let result = eval_with_macros(&call_inner, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(15.0)); // 10 + 5 = 15
+    }
+
+    #[test]
+    fn test_lambda_primitive_arity_errors() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Test wrong number of arguments to %%lambda
+        let invalid_lambda1 = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            // Missing body
+        ]);
+
+        let result = eval_with_macros(&invalid_lambda1, &env, &macro_expander);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RispyError::ArityError(_)));
+
+        // Test too many arguments to %%lambda
+        let invalid_lambda2 = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::Number(1.0),
+            Value::Number(2.0), // Extra argument
+        ]);
+
+        let result = eval_with_macros(&invalid_lambda2, &env, &macro_expander);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RispyError::ArityError(_)));
+    }
+
+    #[test]
+    fn test_lambda_primitive_parameter_validation() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Test non-list parameter specification
+        let invalid_lambda1 = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::Symbol("x".to_string()), // Should be a list
+            Value::Number(1.0),
+        ]);
+
+        let result = eval_with_macros(&invalid_lambda1, &env, &macro_expander);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RispyError::TypeError(_)));
+
+        // Test non-symbol in parameter list
+        let invalid_lambda2 = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![
+                Value::Symbol("x".to_string()),
+                Value::Number(42.0), // Should be a symbol
+            ]),
+            Value::Number(1.0),
+        ]);
+
+        let result = eval_with_macros(&invalid_lambda2, &env, &macro_expander);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), RispyError::TypeError(_)));
+    }
+
+    #[test]
+    fn test_lambda_primitive_complex_body() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create lambda with complex body (conditional logic)
+        let lambda_expr = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("x".to_string())]),
+            Value::List(vec![
+                Value::Symbol("if".to_string()),
+                Value::List(vec![
+                    Value::Symbol("<".to_string()),
+                    Value::Symbol("x".to_string()),
+                    Value::Number(0.0),
+                ]),
+                Value::List(vec![
+                    Value::Symbol("-".to_string()),
+                    Value::Number(0.0),
+                    Value::Symbol("x".to_string()),
+                ]),
+                Value::Symbol("x".to_string()),
+            ]),
+        ]);
+
+        let lambda_func = eval_with_macros(&lambda_expr, &env, &macro_expander).unwrap();
+        env.define("abs".to_string(), lambda_func);
+
+        // Test with positive number
+        let call_pos = Value::List(vec![
+            Value::Symbol("abs".to_string()),
+            Value::Number(5.0),
+        ]);
+        let result = eval_with_macros(&call_pos, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(5.0));
+
+        // Test with negative number
+        let call_neg = Value::List(vec![
+            Value::Symbol("abs".to_string()),
+            Value::Number(-3.0),
+        ]);
+        let result = eval_with_macros(&call_neg, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(3.0));
+    }
+
+    #[test]
+    fn test_lambda_primitive_recursion() {
+        let (env, macro_expander) = create_global_environment_with_macros();
+
+        // Create recursive lambda for factorial
+        let factorial_lambda = Value::List(vec![
+            Value::Symbol("%%lambda".to_string()),
+            Value::List(vec![Value::Symbol("n".to_string())]),
+            Value::List(vec![
+                Value::Symbol("if".to_string()),
+                Value::List(vec![
+                    Value::Symbol("=".to_string()),
+                    Value::Symbol("n".to_string()),
+                    Value::Number(0.0),
+                ]),
+                Value::Number(1.0),
+                Value::List(vec![
+                    Value::Symbol("*".to_string()),
+                    Value::Symbol("n".to_string()),
+                    Value::List(vec![
+                        Value::Symbol("factorial".to_string()), // Recursive call
+                        Value::List(vec![
+                            Value::Symbol("-".to_string()),
+                            Value::Symbol("n".to_string()),
+                            Value::Number(1.0),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ]);
+
+        let factorial_func = eval_with_macros(&factorial_lambda, &env, &macro_expander).unwrap();
+        env.define("factorial".to_string(), factorial_func);
+
+        // Test factorial(5) = 120
+        let call_expr = Value::List(vec![
+            Value::Symbol("factorial".to_string()),
+            Value::Number(5.0),
+        ]);
+
+        let result = eval_with_macros(&call_expr, &env, &macro_expander).unwrap();
+        assert_eq!(result, Value::Number(120.0)); // 5! = 120
     }
 }
